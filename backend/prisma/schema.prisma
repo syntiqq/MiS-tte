@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String   @id                    // Telegram user_id (string)
+  username        String?
+  firstName       String?
+  createdAt       DateTime @default(now())
+  lastSeen        DateTime @default(now())
+
+  // Баланс и lifetime
+  coins           Int      @default(0)            // текущий баланс (тратится)
+  coinsLifetime   Int      @default(0)            // никогда не уменьшается — база дропа
+
+  // Энергия
+  energy          Int      @default(500)          // текущая энергия (0–500)
+  energyUpdatedAt DateTime @default(now())        // когда последний раз считали реген
+
+  // Пассивный доход
+  passiveRate     Int      @default(60)           // монет/час (базовая = 60)
+  nftBonus        Int      @default(0)            // монет/день от NFT (пересчитывается при обновлении кошелька)
+  passiveClaimedAt DateTime @default(now())       // когда последний раз собирали пассивку
+
+  // Кошелёк и NFT
+  walletAddress   String?  @unique
+  nftCachedAt     DateTime?
+  
+  // Анти-бот
+  tapCount        Int      @default(0)            // всего тапов за жизнь
+  lastTapAt       DateTime?
+  suspicionScore  Int      @default(0)            // 0–100, растёт при подозрительной активности
+
+  // Ежедневный бонус
+  lastDailyAt     DateTime?
+
+  // Связи
+  nfts            UserNft[]
+  tapSessions     TapSession[]
+  transactions    Transaction[]
+
+  @@index([coinsLifetime])                        // для лидерборда дропа
+  @@index([nftBonus])                             // для лидерборда красоты
+}
+
+model UserNft {
+  id              Int      @id @default(autoincrement())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  
+  nftAddress      String                          // адрес NFT в TON
+  phoneNumber     String                          // номер телефона (+999...)
+  beautyScore     Float                           // % красоты (0–100)
+  dailyBonus      Int                             // монет/день от этого NFT (с учётом диминишинга позиции)
+  rank            Int                             // позиция среди номеров юзера (1=лучший)
+  
+  cachedAt        DateTime @default(now())
+
+  @@unique([userId, nftAddress])
+  @@index([userId, rank])
+}
+
+model TapSession {
+  id              Int      @id @default(autoincrement())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  
+  tapsCount       Int                             // сколько тапов в этой сессии
+  coinsEarned     Int                             // сколько монет начислено
+  energySpent     Int                             // сколько энергии потрачено
+  clientTs        BigInt                          // timestamp с клиента (для анализа)
+  serverTs        DateTime @default(now())        // timestamp сервера (приоритет)
+
+  @@index([userId, serverTs])
+}
+
+model Transaction {
+  id              Int      @id @default(autoincrement())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  
+  type            String                          // TAP | PASSIVE | NFT_SYNC | BOOST_ENERGY | BOOST_REGEN | DAILY | ADSGRAM
+  amount          Int                             // + приход, - трата
+  balanceBefore   Int
+  balanceAfter    Int
+  meta            String?                         // JSON с деталями
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model DailyPrizePool {
+  id              Int      @id @default(autoincrement())
+  month           String   @unique                 // "2025-01"
+  totalPrizes     Int                             // сколько призов в этом месяце
+  givenPrizes     Int      @default(0)            // сколько уже выдано
+  updatedAt       DateTime @updatedAt
+}
